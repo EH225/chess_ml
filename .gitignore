@@ -1,0 +1,10 @@
+*__pycache__*
+*.docx
+results/
+word_docs/
+*.tmp
+*github_keys/
+*scratch/
+*.ipynb_checkpoints*
+*refs/
+*stockfish/
