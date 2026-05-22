@@ -28,7 +28,7 @@ torch.backends.mkldnn.enabled = True  # Usually enabled, but set to be sure
 class MaterialHeuristic(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
-        self.device = "cpu"  # Alwys run on the CPU
+        self.device = "cpu"  # Always run on the CPU
         self.pos_embeddings = nn.Parameter(torch.zeros(1))  # Needs a parameter for the optimizer init
 
     def forward(self, state_batch: List[str]) -> torch.Tensor:
