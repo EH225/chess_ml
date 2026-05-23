@@ -59,7 +59,7 @@ class SupervisedImitationDataset(Dataset):
         """
         fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "fen_states": fen,
+            "fen": fen,
             "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
             "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
         }
