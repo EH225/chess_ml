@@ -26,17 +26,17 @@ from utils.general import read_yaml, create_move_to_idx_map
 
 def get_legal_move_mask(fen: str, move_uci_to_idx: Dict) -> torch.Tensor:
     """
-    Converts a FEN board encoding to a [1, 1968] length torch.Tensor of bool values denoting which ones are
+    Converts a FEN board encoding to a (1968, ) length torch.Tensor of bool values denoting which ones are
     legal moves.
 
     :param fen: An input string FEN board state encoding.
     :param move_uci_to_idx: A dictionary mapping for UCI moves e.g. "a1a2" to int values [0, 1967].
-    :return: A torch.Tensor mask of size [1, 1968] of bools denoting which moves are legal.
+    :return: A torch.Tensor mask of size (1968, ) of bools denoting which moves are legal.
     """
-    legal_move_mask = torch.zeros(1, 1968, dtype=torch.bool)
+    legal_move_mask = torch.zeros(1968, dtype=torch.bool)
     board = chess.Board(fen)
     for move in board.legal_moves:
-        legal_move_mask[0, move_uci_to_idx[move.uci()]] = True
+        legal_move_mask[move_uci_to_idx[move.uci()]] = True
     return legal_move_mask
 
 
@@ -75,7 +75,7 @@ class SupervisedImitationDataset(Dataset):
         """
         fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "state_tensor": self.state_to_model_input([fen, ]),
+            "state_tensor": self.state_to_model_input([fen,]).squeeze(0),
             "legal_move_mask": get_legal_move_mask(fen, self.move_uci_to_idx),
             "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
             "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
