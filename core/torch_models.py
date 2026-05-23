@@ -152,6 +152,7 @@ class MLP(nn.Module):
         :param state_batch: A batch of FEN states as a list of strings.
         :return: A torch.Tensor of size (batch_size, (8 * 8 * 7 + 4)) = (batch_size, 452)
         """
+        state_batch = [state_batch, ] if isinstance(state_batch, str) else state_batch
         sym_to_int = {s: i for i, s in enumerate("pnbrqk")}  # Mapping from symbol e.g. "b" to index e.g. 2
         output = torch.zeros((len(state_batch), 8, 8, 7))  # 8 rows, 8 cols, 6 piece types, encode -1, 0, or 1
         # plus 1 more for en passant moves allowed if any on the [8 x 8] grid. Encode as +1 is it can be done
@@ -353,6 +354,7 @@ class CNN(nn.Module):
         :param state_batch: A batch of FEN states as a list of strings.
         :return: A torch.Tensor of size (batch_size, 17, 8, 8)
         """
+        state_batch = [state_batch, ] if isinstance(state_batch, str) else state_batch
         sym_to_int = {s: i for i, s in enumerate("pnbrqk")}  # Mapping from symbol e.g. "b" to index e.g. 2
         output = torch.zeros((len(state_batch), 17, 8, 8))  # 17 channels, 8 rows, 8 cols
 
@@ -540,6 +542,7 @@ class Transformer(nn.Module):
         :param state_batch: A batch of FEN states as a list of strings.
         :return: A torch.Tensor of size (batch_size, 68, E) containing vector embeddings.
         """
+        state_batch = [state_batch, ] if isinstance(state_batch, str) else state_batch
         sym_to_int = {s: (i + 1) for i, s in enumerate("pnbrqk")}  # Mapping from symbol to int starting at 1
         output = torch.zeros((len(state_batch), 8, 8), dtype=torch.int)  # 8 x 8 = 64 squares on a chess
         # board, use 0 to denote blank squares, [1, 6] for the friendly pieces and [7, 12] for foe

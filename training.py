@@ -75,7 +75,7 @@ class SupervisedImitationDataset(Dataset):
         """
         fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "state_tensor": self.state_to_model_input(fen),
+            "state_tensor": self.state_to_model_input([fen, ]),
             "legal_move_mask": get_legal_move_mask(fen, self.move_uci_to_idx),
             "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
             "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
@@ -293,7 +293,7 @@ class Trainer:
                 g["lr"] = self.lr_start
 
             # Instead of loading the prior learning rate scheduler from disk, create a new one according to
-            # the new config provided to continue traing after the prior end
+            # the new config provided to continue training after the prior end
             self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
                                       total_iters=self.train_num_steps - self.step, last_epoch=-1)
 
@@ -379,7 +379,7 @@ class Trainer:
             while self.step < self.train_num_steps:  # Run until all training iterations are complete
                 # Get the next training batch and move it to the same device as the model
                 batch = next(inf_dataloader)
-                state_tensors = batch["state_tensor"].to(self.device, non_blocking=True)
+                state_tensor = batch["state_tensor"].to(self.device, non_blocking=True)
                 mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                 value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                 policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
@@ -389,7 +389,7 @@ class Trainer:
                 # along the first 2 dims as captions but also gives the prob dist across the vocab
                 if self.amp_dtype is not None:
                     with torch.autocast(device_type=self.device, dtype=self.amp_dtype):
-                        policy_logits, value_est = self.model(state_tensors)
+                        policy_logits, value_est = self.model(state_tensor)
                         if mask_illegal_moves:  # If True, mask out illegal moves from the policy logits with
                             # -np.inf so that the model does not get penalized for giving them prob mass
                             policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
@@ -397,7 +397,7 @@ class Trainer:
                         value_loss = value_loss_fn(value_est, value_tgt)
                         total_loss = policy_loss + value_loss * lambda_val
                 else:
-                    policy_logits, value_est = self.model(state_tensors)
+                    policy_logits, value_est = self.model(state_tensor)
                     if mask_illegal_moves:  # If True, mask out illegal moves from the policy logits with
                         # -np.inf so that the model does not get penalized for giving them prob mass
                         policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
@@ -440,16 +440,16 @@ class Trainer:
                     with torch.no_grad():
                         n_obs_total, policy_loss, value_loss = 0.0, 0.0, 0.0
                         for batch in self.val_dataloader:
-                            state_tensors = batch["state_tensor"].to(self.device, non_blocking=True)
+                            state_tensor = batch["state_tensor"].to(self.device, non_blocking=True)
                             mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                             value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                             policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
-                            n_obs = len(state_tensors)  # Total number of obs in this batch
+                            n_obs = len(state_tensor)  # Total number of obs in this batch
                             n_obs_total += n_obs  # Aggregate the total nobs seen
 
                             if self.amp_dtype is not None:
                                 with torch.autocast(device_type=self.device, dtype=self.amp_dtype):
-                                    policy_logits, value_est = self.model(state_tensors)
+                                    policy_logits, value_est = self.model(state_tensor)
                                     if mask_illegal_moves:  # If True, mask out illegal moves from the policy
                                         # logits with -np.inf so that the model does not get penalized for
                                         # giving them prob mass
@@ -457,7 +457,7 @@ class Trainer:
                                     policy_loss += policy_loss_fn(policy_logits, policy_tgt).item() * n_obs
                                     value_loss += value_loss_fn(value_est, value_tgt).item() * n_obs
                             else:
-                                policy_logits, value_est = self.model(state_tensors)
+                                policy_logits, value_est = self.model(state_tensor)
                                 if mask_illegal_moves:  # If True, mask out illegal moves from the policy
                                     # logits with -np.inf so that the model does not get penalized for giving
                                     # them prob mass
@@ -484,7 +484,7 @@ class Trainer:
                     gc.collect()  # This will slow down training if called too often
 
                 del policy_logits, value_est, mask, policy_loss, value_loss, total_loss
-                del state_tensors, value_tgt, policy_tgt, batch
+                del state_tensor, value_tgt, policy_tgt, batch
                 pbar.update(1)
 
 
