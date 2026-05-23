@@ -7,7 +7,6 @@ CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
 sys.path.insert(0, PARENT_DIR)
 
-import numpy as np
 import torch
 import argparse
 import torch.nn as nn
@@ -15,10 +14,11 @@ from tqdm.auto import tqdm
 from typing import Tuple, Callable, Dict, List
 import logging, gc
 import chess
+import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import SequentialLR, LinearLR
-from utils.general import get_device, get_amp_dtype
+from utils.general import get_device, get_amp_dtype, generate_loss_plots
 from core.torch_models import MLP, CNN, Transformer
 from utils.general import read_yaml, create_move_to_idx_map
 
@@ -171,24 +171,24 @@ class Trainer:
         self.val_dataloader = val_dataloader
 
         # Configure the optimizer for training, exclude bias and BatchNorm weights from weight decay
-        decay_params = [p for n, p in model.named_parameters()
-                        if p.requires_grad and not any(nd in n for nd in ['bias', 'bn'])]
-        no_decay_params = [p for n, p in model.named_parameters()
-                            if p.requires_grad and any(nd in n for nd in ['bias', 'bn'])]
-        # decay_params, no_decay_params= [], []
+        # decay_params = [p for n, p in model.named_parameters()
+        #                 if p.requires_grad and not any(nd in n for nd in ['bias', 'bn'])]
+        # no_decay_params = [p for n, p in model.named_parameters()
+        #                     if p.requires_grad and any(nd in n for nd in ['bias', 'bn'])]
+        decay_params, no_decay_params= [], []
 
-        # for module in model.modules():
-        #     for name, param in module.named_parameters(recurse=False):
-        #         if not param.requires_grad: # Skip over if no gradient tracking
-        #             continue
+        for module in model.modules():
+            for name, param in module.named_parameters(recurse=False):
+                if not param.requires_grad: # Skip over if no gradient tracking
+                    continue
 
-        #         if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-        #             # Exclude any kind of batch norm from weight decay
-        #             no_decay_params.append(param)
-        #         elif name == "bias": # Also exclude any bias terms from weight decay as well
-        #             no_decay_params.append(param)
-        #         else: # All others will have weight decay applied to them
-        #             decay_params.append(param)
+                if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                    # Exclude any kind of batch norm from weight decay
+                    no_decay_params.append(param)
+                elif name == "bias": # Also exclude any bias terms from weight decay as well
+                    no_decay_params.append(param)
+                else: # All others will have weight decay applied to them
+                    decay_params.append(param)
 
         # Check that all parameters are fully partitioned across decay_params and no_decay_params, check that
         # there is no overlap and also that the total number across both subsets sums to the expected total
@@ -452,6 +452,8 @@ class Trainer:
                     # Clear the list of losses after each save, store only the ones from the last save to
                     # the next save
                     self.train_losses, self.val_losses = [], []
+                    # Generate new loss plots after saving additional loss data to disk
+                    generate_loss_plots(self.losses_folder, self.results_folder)
                     torch.cuda.empty_cache()
                     gc.collect() # This will slow down training if called too often
 
@@ -468,7 +470,7 @@ def run_training(config_name: str) -> None:
     :returns: None.
     """
     # 1). Read in the config file specified by the user to be used for model training
-    config = read_yaml(os.path.join(PARENT_DIR, f"config/{config_name}.yml"))
+    config = read_yaml(os.path.join(CURRENT_DIR, f"config/{config_name}.yml"))
 
     # 2). Initialize the model specified by the config file
     model_class_dict = {"MLP": MLP, "CNN": CNN, "Transformer": Transformer}
@@ -476,12 +478,12 @@ def run_training(config_name: str) -> None:
     model = model_class(config)  # Init the model using the config file
 
     # 3). Define other inputs required for training
-    train_dataset_path = os.path.join(CURRENT_DIR, "lichess_train.parquet")
+    train_dataset_path = os.path.join(CURRENT_DIR, "dataset/lichess_train.parquet")
     train_dataloader = get_dataloader(batch_size=config['training']['batch_size'],
                                       dataset_path=train_dataset_path,
                                       state_to_model_input=model.state_to_model_input)
 
-    val_dataset_path = os.path.join(CURRENT_DIR, "lichess_val.parquet")
+    val_dataset_path = os.path.join(CURRENT_DIR, "dataset/lichess_val.parquet")
     val_dataloader = get_dataloader(batch_size=config['training']['batch_size'],
                                     dataset_path=val_dataset_path,
                                     state_to_model_input=model.state_to_model_input)
