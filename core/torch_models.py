@@ -92,8 +92,9 @@ class MLP(nn.Module):
         self.hidden_size = int(config["model"].get("hidden_size", 256))
         self.dropout = float(config["model"].get("dropout", 0.2))
 
-        input_shape = 8 * 8 * 6 + 4  # 8 rows, 8 cols, 6 piece types, -1, 0, 1 values denoting a piece as
-        # friendly or foe or if the cell is empty for a total size of 388 input features +4 castling rights
+        input_shape = 8 * 8 * 7 + 4  # 8 rows, 8 cols, 6 piece types and 1 en passant plane, -1, 0, 1 values
+        # denoting a piece as friendly or foe or if the cell is empty for a total size of 452 input features
+        # +4 castling rights
 
         # 1). Begin with a shared backbone for both the policy head and value head
         self.input_layer = nn.Sequential(

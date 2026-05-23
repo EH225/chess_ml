@@ -1,14 +1,14 @@
 """
 This module contains the source code for running supervised imitation learning for a policy-value model.
 """
-import sys, os
+import sys, os, psutil
 
 CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
 sys.path.insert(0, PARENT_DIR)
 
 import torch
-import argparse
+import argparse, pyarrow
 import torch.nn as nn
 from tqdm.auto import tqdm
 from typing import Tuple, Callable, Dict, List
@@ -37,7 +37,12 @@ class SupervisedImitationDataset(Dataset):
         :param state_to_model_input: A callable function that converts a batch of FEN board state encodings
             into a torch.Tensor that can be passed into the model.
         """
-        self.dataset = pd.read_parquet(dataset_path)  # Read in the data as a pd.DataFrame, 2.6 GB
+        table = pyarrow.parquet.read_table(dataset_path)
+        self.fens = table["fen"]
+        self.value_tgt = table["value_tgt"].to_numpy()
+        self.policy_tgt = table["policy_tgt"].to_numpy()
+
+        self.dataset = pd.read_parquet(dataset_path)
         self.state_to_model_input = state_to_model_input  # Converts a FEN str into a torch.Tensor
 
     def __len__(self):
@@ -51,12 +56,47 @@ class SupervisedImitationDataset(Dataset):
         Returns a dictionary containing keys: fen_states, state_tensors, value_tgts, and policy_tgts for a
         particular index in the dataset.
         """
+        fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "fen_states": self.dataset.loc[idx, "fen"],
-            "state_tensors": self.state_to_model_input([self.dataset.loc[idx, "fen"]]).squeeze(0),
-            "value_tgt": torch.tensor(self.dataset.loc[idx, "value_tgt"], dtype=torch.float32),
-            "policy_tgt": torch.tensor(self.dataset.loc[idx, "policy_tgt"], dtype=torch.long),
+            "fen_states": fen,
+            "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
+            "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
         }
+
+
+def create_collate_fn(state_to_model_input: Callable, move_uci_to_idx: Dict) -> Callable:
+    """
+    Defines the creation of a custom collate function to combine the individual worker __getitem__ outputs
+    into 1 combined batch. FENs are converted into state tensors and legal move masks all at once.
+
+    :param state_to_model_input: A callable function or method used for converting FENs to tensors.
+    :param move_uci_to_idx: A dictionary mapping UCI moves e.g. "a1a3" to ints [0, 1967].
+    :returns: A custom collate function that combines entries into a single batch.
+    """
+
+    def collate_fn(batch):
+        fens = [x["fen"] for x in batch]  # Collect all FENs into 1 list
+        state_tensors = state_to_model_input(fens)  # Convert from FEN strings to torch.Tensors
+
+        # Also construct the legal move masks here for each FEN as well
+        legal_move_mask = torch.zeros(len(fens), 1968, dtype=torch.bool)
+        for i, fen in enumerate(fens):
+            board = chess.Board(fen)
+            for move in board.legal_moves:
+                legal_move_mask[i, move_uci_to_idx[move.uci()]] = True
+
+        # Aggregate training targets into torch.Tensors
+        value_tgt = torch.tensor([x["value_tgt"] for x in batch], dtype=torch.float32)
+        policy_tgt = torch.tensor([x["policy_tgt"] for x in batch], dtype=torch.long)
+
+        return {
+            "state_tensors": state_tensors,
+            "legal_move_mask": legal_move_mask,
+            "value_tgt": value_tgt,
+            "policy_tgt": policy_tgt,
+        }
+
+    return collate_fn
 
 
 def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Callable) -> DataLoader:
@@ -76,7 +116,8 @@ def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Cal
     else:
         num_workers, pin_memory, persistent_workers = 0, False, False
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=4)
+                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=2,
+                      collate_fn=create_collate_fn(state_to_model_input, create_move_to_idx_map()))
 
 
 def infinite_loader(dataloader: DataLoader):
@@ -162,7 +203,7 @@ class Trainer:
         self.device = get_device()  # Auto-detect what device to use for training
         self.grad_clip = grad_clip  # The amount of gradient clipping to use during training
         self.amp_dtype = get_amp_dtype(self.device) if use_amp else None
-        self.eval_every = eval_every # The frequency of validation set evals
+        self.eval_every = eval_every  # The frequency of validation set evals
         self.save_every = save_every  # The frequency of saving model weights
         self.train_num_steps = train_num_steps  # The total number of training steps
 
@@ -175,19 +216,19 @@ class Trainer:
         #                 if p.requires_grad and not any(nd in n for nd in ['bias', 'bn'])]
         # no_decay_params = [p for n, p in model.named_parameters()
         #                     if p.requires_grad and any(nd in n for nd in ['bias', 'bn'])]
-        decay_params, no_decay_params= [], []
+        decay_params, no_decay_params = [], []
 
         for module in model.modules():
             for name, param in module.named_parameters(recurse=False):
-                if not param.requires_grad: # Skip over if no gradient tracking
+                if not param.requires_grad:  # Skip over if no gradient tracking
                     continue
 
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
                     # Exclude any kind of batch norm from weight decay
                     no_decay_params.append(param)
-                elif name == "bias": # Also exclude any bias terms from weight decay as well
+                elif name == "bias":  # Also exclude any bias terms from weight decay as well
                     no_decay_params.append(param)
-                else: # All others will have weight decay applied to them
+                else:  # All others will have weight decay applied to them
                     decay_params.append(param)
 
         # Check that all parameters are fully partitioned across decay_params and no_decay_params, check that
@@ -198,7 +239,7 @@ class Trainer:
         self.opt = torch.optim.AdamW([
             {'params': decay_params, 'weight_decay': weight_decay},
             {'params': no_decay_params, 'weight_decay': 0.0}
-            ], lr=lr_start, betas=adam_betas)
+        ], lr=lr_start, betas=adam_betas)
 
         self.scaler = torch.amp.GradScaler('cuda')
 
@@ -221,7 +262,6 @@ class Trainer:
             if len(checkpoints) > 0:
                 last_checkpoint = max([int(x.replace("model-", "").replace(".pt", "")) for x in checkpoints])
                 self.load(last_checkpoint)  # Load in the most recent milestone to continue training
-
 
     def save(self, milestone: int) -> None:
         """
@@ -275,7 +315,7 @@ class Trainer:
             self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
                                       total_iters=self.train_num_steps - self.step, last_epoch=-1)
 
-        else: # If not resetting the LR scheduler, then load in the state dict to re-store it
+        else:  # If not resetting the LR scheduler, then load in the state dict to re-store it
             self.scheduler.load_state_dict(checkpoint_data["scheduler"])
 
         # Losses are not loaded in, they are saved to disk periodically with the model weights and are not
@@ -287,22 +327,43 @@ class Trainer:
                 if torch.is_tensor(v):
                     state[k] = v.to(self.device)
 
-
-    def _get_legal_move_mask(self, state_batch: List[str], move_uci_to_idx: Dict) -> torch.Tensor:
+    def report_memory_usage(self) -> None:
         """
-        Returns a boolean mask of shape (num_batch, 1968) where True = legal move.
-
-        :param state_batch: A list of fen board states.
-        :param move_uci_to_idx: A dictionary mapping UCI moves e.g. "a1a2" to integers e.g. 5.
-        :returns: A (batch_size, 1968) mask matching the shape of a policy_logits output denoting which moves
-            are legal.
+        Reports the current memory usage on the CPU and GPU if available via logging.
         """
-        mask = torch.zeros(len(state_batch), 1968, dtype=torch.bool)
-        for i, state in enumerate(state_batch):
-            board = chess.Board(state)
-            for move in board.legal_moves:
-                mask[i, move_uci_to_idx[move.uci()]] = True
-        return mask
+        process = psutil.Process(os.getpid())
+
+        cpu_ram_gb = process.memory_info().rss / (1024 ** 3)
+
+        if torch.cuda.is_available():
+            gpu_alloc_gb = torch.cuda.memory_allocated() / (1024 ** 3)
+            gpu_reserved_gb = torch.cuda.memory_reserved() / (1024 ** 3)
+
+            self.logger.info(
+                f"RAM={cpu_ram_gb:.2f} GB | "
+                f"GPU alloc={gpu_alloc_gb:.2f} GB | "
+                f"GPU reserved={gpu_reserved_gb:.2f} GB"
+            )
+        else:
+            self.logger.info(f"RAM={cpu_ram_gb:.2f} GB")
+
+    def report_lr_opt_state(self) -> None:
+        """
+        Reports on the current optimizer learning rate and state via logging.
+        """
+        lr = self.opt.param_groups[0]['lr']
+        exp_avg_norm = torch.stack([
+            s['exp_avg'].norm() for s in self.opt.state.values() if 'exp_avg' in s
+        ]).mean().item()
+        exp_avg_sq_norm = torch.stack([
+            s['exp_avg_sq'].norm() for s in self.opt.state.values() if 'exp_avg_sq' in s
+        ]).mean().item()
+
+        last_lr = self.scheduler.get_last_lr()[0]
+        self.logger.info(
+            f"step={self.step} | lr={lr:.2e} | scheduler_lr={last_lr:.2e} | "
+            f"exp_avg_norm={exp_avg_norm:.4f} | exp_avg_sq_norm={exp_avg_sq_norm:.4f}"
+        )
 
     def train(self, lambda_val: float = 15.0, mask_illegal_moves: bool = True) -> None:
         """
@@ -337,6 +398,7 @@ class Trainer:
                 # Get the next training batch and move it to the same device as the model
                 batch = next(inf_dataloader)
                 state_tensors = batch["state_tensors"].to(self.device, non_blocking=True)
+                mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                 value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                 policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
 
@@ -348,8 +410,6 @@ class Trainer:
                         policy_logits, value_est = self.model(state_tensors)
                         if mask_illegal_moves:  # If True, mask out illegal moves from the policy logits with
                             # -np.inf so that the model does not get penalized for giving them prob mass
-                            mask = self._get_legal_move_mask(batch["fen_states"],
-                                                             self.move_uci_to_idx).to(self.device)
                             policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
                         policy_loss = policy_loss_fn(policy_logits, policy_tgt)
                         value_loss = value_loss_fn(value_est, value_tgt)
@@ -358,8 +418,6 @@ class Trainer:
                     policy_logits, value_est = self.model(state_tensors)
                     if mask_illegal_moves:  # If True, mask out illegal moves from the policy logits with
                         # -np.inf so that the model does not get penalized for giving them prob mass
-                        mask = self._get_legal_move_mask(batch["fen_states"],
-                                                         self.move_uci_to_idx).to(self.device)
                         policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
                     policy_loss = policy_loss_fn(policy_logits, policy_tgt)
                     value_loss = value_loss_fn(value_est, value_tgt)
@@ -391,31 +449,21 @@ class Trainer:
                 self.step += 1
 
                 if self.step % 1000 == 0:
-                    lr = self.opt.param_groups[0]['lr']
-                    exp_avg_norm = torch.stack([
-                        s['exp_avg'].norm() for s in self.opt.state.values() if 'exp_avg' in s
-                    ]).mean().item()
-                    exp_avg_sq_norm = torch.stack([
-                        s['exp_avg_sq'].norm() for s in self.opt.state.values() if 'exp_avg_sq' in s
-                    ]).mean().item()
-
-                    last_lr = self.scheduler.get_last_lr()[0]
-                    self.logger.info(
-                        f"step={self.step} | lr={lr:.2e} | scheduler_lr={last_lr:.2e} | "
-                        f"exp_avg_norm={exp_avg_norm:.4f} | exp_avg_sq_norm={exp_avg_sq_norm:.4f}"
-                    )
+                    self.report_lr_opt_state()  # Report info about the current learning rate and opt state
+                    self.report_memory_usage()  # Report info about the memory usage
 
                 # Periodically run evaluation metrics on the validation data set, always on the last iter too
                 if self.step % self.eval_every == 0 or self.step == self.train_num_steps:
-                    self.model.eval() # Set model to evaluation mode
+                    self.model.eval()  # Set model to evaluation mode
                     with torch.no_grad():
                         n_obs_total, policy_loss, value_loss = 0.0, 0.0, 0.0
                         for batch in self.val_dataloader:
                             state_tensors = batch["state_tensors"].to(self.device, non_blocking=True)
+                            mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                             value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                             policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
-                            n_obs = len(state_tensors) # Total number of obs in this batch
-                            n_obs_total += n_obs # Aggregate the total nobs seen
+                            n_obs = len(state_tensors)  # Total number of obs in this batch
+                            n_obs_total += n_obs  # Aggregate the total nobs seen
 
                             if self.amp_dtype is not None:
                                 with torch.autocast(device_type=self.device, dtype=self.amp_dtype):
@@ -423,8 +471,6 @@ class Trainer:
                                     if mask_illegal_moves:  # If True, mask out illegal moves from the policy
                                         # logits with -np.inf so that the model does not get penalized for
                                         # giving them prob mass
-                                        mask = self._get_legal_move_mask(batch["fen_states"],
-                                                                         self.move_uci_to_idx).to(self.device)
                                         policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
                                     policy_loss += policy_loss_fn(policy_logits, policy_tgt).item() * n_obs
                                     value_loss += value_loss_fn(value_est, value_tgt).item() * n_obs
@@ -433,18 +479,16 @@ class Trainer:
                                 if mask_illegal_moves:  # If True, mask out illegal moves from the policy
                                     # logits with -np.inf so that the model does not get penalized for giving
                                     # them prob mass
-                                    mask = self._get_legal_move_mask(batch["fen_states"],
-                                                                     self.move_uci_to_idx).to(self.device)
                                     policy_logits = policy_logits.masked_fill(~mask, float('-inf'))
                                 policy_loss += policy_loss_fn(policy_logits, policy_tgt).item() * n_obs
                                 value_loss += value_loss_fn(value_est, value_tgt).item() * n_obs
 
                         # Normalize the sum of policy and value losses by total obs in the validation set
-                        policy_loss, value_loss= policy_loss / n_obs_total, value_loss / n_obs_total
+                        policy_loss, value_loss = policy_loss / n_obs_total, value_loss / n_obs_total
                         total_loss = policy_loss + value_loss * lambda_val
                         self.val_losses.append((self.step, policy_loss, value_loss, total_loss))
 
-                    self.model.train() # Set model back to train mode
+                    self.model.train()  # Set model back to train mode
 
                 # Periodically save the model weights to disk, always on the last iter too
                 if self.step % self.save_every == 0 or self.step == self.train_num_steps:
@@ -455,7 +499,7 @@ class Trainer:
                     # Generate new loss plots after saving additional loss data to disk
                     generate_loss_plots(self.losses_folder, self.results_folder)
                     torch.cuda.empty_cache()
-                    gc.collect() # This will slow down training if called too often
+                    gc.collect()  # This will slow down training if called too often
 
                 del policy_logits, value_est, mask, policy_loss, value_loss, total_loss
                 del state_tensors, value_tgt, policy_tgt, batch
