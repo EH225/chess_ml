@@ -75,7 +75,7 @@ class SupervisedImitationDataset(Dataset):
         """
         fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "state_tensor": self.state_to_model_input([fen,]).squeeze(0),
+            "state_tensor": self.state_to_model_input([fen, ]).squeeze(0),
             "legal_move_mask": get_legal_move_mask(fen, self.move_uci_to_idx),
             "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
             "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
@@ -99,7 +99,7 @@ def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Cal
     else:
         num_workers, pin_memory, persistent_workers = 0, False, False
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=10)
+                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=4)
 
 
 def infinite_loader(dataloader: DataLoader):
