@@ -1,0 +1,24 @@
+# This config file is for the CNN-based chess agent model
+model: "CNN_Debug" # Name of the model being trained, determines the output directory name
+model_class: "CNN" # Should match one of the model classes in core/torch_models.py
+
+output:
+    output_path: &output_path "results/CNN_Debug/" # Directory of training results
+
+model:
+    n_blocks: 3
+    channels: 64
+    dropout: 0.2
+
+training: # Specifies the imitation learning, supervised training parameters
+    batch_size: 32
+    lr_start: 2.0e-3
+    lr_end: 5.0e-6
+    weight_decay: 1.0e-2
+    train_num_steps: 300
+    grad_clip: 1.0
+    eval_every: 50
+    save_every: 50
+    use_amp: True
+    use_latest_checkpoint: True
+    reset_lr_scheduler: False
