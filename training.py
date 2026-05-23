@@ -24,6 +24,22 @@ from core.torch_models import MLP, CNN, Transformer
 from utils.general import read_yaml, create_move_to_idx_map
 
 
+def get_legal_move_mask(fen: str, move_uci_to_idx: Dict) -> torch.Tensor:
+    """
+    Converts a FEN board encoding to a [1, 1968] length torch.Tensor of bool values denoting which ones are
+    legal moves.
+
+    :param fen: An input string FEN board state encoding.
+    :param move_uci_to_idx: A dictionary mapping for UCI moves e.g. "a1a2" to int values [0, 1967].
+    :return: A torch.Tensor mask of size [1, 1968] of bools denoting which moves are legal.
+    """
+    legal_move_mask = torch.zeros(1, 1968, dtype=torch.bool)
+    board = chess.Board(fen)
+    for move in board.legal_moves:
+        legal_move_mask[0, move_uci_to_idx[move.uci()]] = True
+    return legal_move_mask
+
+
 class SupervisedImitationDataset(Dataset):
     """
     A dataset for supervised imitation learning of a policy-value network on stockfish eval scores and
@@ -43,61 +59,27 @@ class SupervisedImitationDataset(Dataset):
         self.value_tgt = table["value_tgt"].to_numpy()
         self.policy_tgt = table["policy_tgt"].to_numpy()
 
-        self.dataset = pd.read_parquet(dataset_path)
         self.state_to_model_input = state_to_model_input  # Converts a FEN str into a torch.Tensor
+        self.move_uci_to_idx = create_move_to_idx_map()
 
     def __len__(self):
         """
         Returns the total number of observations in the dataset.
         """
-        return len(self.dataset)
+        return len(self.fens)
 
     def __getitem__(self, idx: int) -> Dict:
         """
-        Returns a dictionary containing keys: fen_states, state_tensors, value_tgts, and policy_tgts for a
+        Returns a dictionary containing keys: state_tensor, legal_move_mask, value_tgt, and policy_tgt for a
         particular index in the dataset.
         """
         fen = self.fens[idx].as_py()  # Convert Arrow scalar to Python string
         return {
-            "fen": fen,
+            "state_tensor": self.state_to_model_input(fen),
+            "legal_move_mask": get_legal_move_mask(fen, self.move_uci_to_idx),
             "value_tgt": torch.tensor(self.value_tgt[idx], dtype=torch.float32),
             "policy_tgt": torch.tensor(self.policy_tgt[idx], dtype=torch.long),
         }
-
-
-def create_collate_fn(state_to_model_input: Callable, move_uci_to_idx: Dict) -> Callable:
-    """
-    Defines the creation of a custom collate function to combine the individual worker __getitem__ outputs
-    into 1 combined batch. FENs are converted into state tensors and legal move masks all at once.
-
-    :param state_to_model_input: A callable function or method used for converting FENs to tensors.
-    :param move_uci_to_idx: A dictionary mapping UCI moves e.g. "a1a3" to ints [0, 1967].
-    :returns: A custom collate function that combines entries into a single batch.
-    """
-
-    def collate_fn(batch):
-        fens = [x["fen"] for x in batch]  # Collect all FENs into 1 list
-        state_tensors = state_to_model_input(fens)  # Convert from FEN strings to torch.Tensors
-
-        # Also construct the legal move masks here for each FEN as well
-        legal_move_mask = torch.zeros(len(fens), 1968, dtype=torch.bool)
-        for i, fen in enumerate(fens):
-            board = chess.Board(fen)
-            for move in board.legal_moves:
-                legal_move_mask[i, move_uci_to_idx[move.uci()]] = True
-
-        # Aggregate training targets into torch.Tensors
-        value_tgt = torch.tensor([x["value_tgt"] for x in batch], dtype=torch.float32)
-        policy_tgt = torch.tensor([x["policy_tgt"] for x in batch], dtype=torch.long)
-
-        return {
-            "state_tensors": state_tensors,
-            "legal_move_mask": legal_move_mask,
-            "value_tgt": value_tgt,
-            "policy_tgt": policy_tgt,
-        }
-
-    return collate_fn
 
 
 def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Callable) -> DataLoader:
@@ -113,12 +95,11 @@ def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Cal
     device = get_device()  # Auto-detect the available hardware
     dataset = SupervisedImitationDataset(dataset_path, state_to_model_input)
     if device == "cuda":
-        num_workers, pin_memory, persistent_workers = max(1, os.cpu_count()), True, False
+        num_workers, pin_memory, persistent_workers = max(1, os.cpu_count()), True, True
     else:
         num_workers, pin_memory, persistent_workers = 0, False, False
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=10,
-                      collate_fn=create_collate_fn(state_to_model_input, create_move_to_idx_map()))
+                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=10)
 
 
 def infinite_loader(dataloader: DataLoader):
@@ -398,7 +379,7 @@ class Trainer:
             while self.step < self.train_num_steps:  # Run until all training iterations are complete
                 # Get the next training batch and move it to the same device as the model
                 batch = next(inf_dataloader)
-                state_tensors = batch["state_tensors"].to(self.device, non_blocking=True)
+                state_tensors = batch["state_tensor"].to(self.device, non_blocking=True)
                 mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                 value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                 policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
@@ -459,7 +440,7 @@ class Trainer:
                     with torch.no_grad():
                         n_obs_total, policy_loss, value_loss = 0.0, 0.0, 0.0
                         for batch in self.val_dataloader:
-                            state_tensors = batch["state_tensors"].to(self.device, non_blocking=True)
+                            state_tensors = batch["state_tensor"].to(self.device, non_blocking=True)
                             mask = batch["legal_move_mask"].to(self.device, non_blocking=True)
                             value_tgt = batch["value_tgt"].to(self.device, non_blocking=True)
                             policy_tgt = batch["policy_tgt"].to(self.device, non_blocking=True)
