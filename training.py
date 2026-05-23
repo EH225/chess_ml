@@ -8,7 +8,7 @@ PARENT_DIR = os.path.dirname(CURRENT_DIR)
 sys.path.insert(0, PARENT_DIR)
 
 import torch
-import argparse, pyarrow
+import argparse
 import torch.nn as nn
 from tqdm.auto import tqdm
 from typing import Tuple, Callable, Dict, List
@@ -16,6 +16,7 @@ import logging, gc
 import chess
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import SequentialLR, LinearLR
 from utils.general import get_device, get_amp_dtype, generate_loss_plots
@@ -37,7 +38,7 @@ class SupervisedImitationDataset(Dataset):
         :param state_to_model_input: A callable function that converts a batch of FEN board state encodings
             into a torch.Tensor that can be passed into the model.
         """
-        table = pyarrow.parquet.read_table(dataset_path)
+        table = pq.read_table(dataset_path)
         self.fens = table["fen"]
         self.value_tgt = table["value_tgt"].to_numpy()
         self.policy_tgt = table["policy_tgt"].to_numpy()
