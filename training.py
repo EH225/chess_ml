@@ -113,11 +113,11 @@ def get_dataloader(batch_size: int, dataset_path: str, state_to_model_input: Cal
     device = get_device()  # Auto-detect the available hardware
     dataset = SupervisedImitationDataset(dataset_path, state_to_model_input)
     if device == "cuda":
-        num_workers, pin_memory, persistent_workers = max(1, min(os.cpu_count() - 2, 6)), True, False
+        num_workers, pin_memory, persistent_workers = max(1, os.cpu_count()), True, False
     else:
         num_workers, pin_memory, persistent_workers = 0, False, False
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
-                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=2,
+                      pin_memory=pin_memory, persistent_workers=persistent_workers, prefetch_factor=6,
                       collate_fn=create_collate_fn(state_to_model_input, create_move_to_idx_map()))
 
 
