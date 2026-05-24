@@ -295,7 +295,7 @@ class Trainer:
             # Instead of loading the prior learning rate scheduler from disk, create a new one according to
             # the new config provided to continue training after the prior end
             msg = f"Creating a new learning rate scheduler object, lr_start={self.lr_end}, "
-            msg += "lr_end={self.lr_end} over {self.train_num_steps - self.step} steps"
+            msg += f"lr_end={self.lr_end} over {self.train_num_steps - self.step} steps"
             self.logger.info(msg)
             self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
                                       total_iters=self.train_num_steps - self.step, last_epoch=-1)
