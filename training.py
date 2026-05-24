@@ -194,10 +194,6 @@ class Trainer:
         self.val_dataloader = val_dataloader
 
         # Configure the optimizer for training, exclude bias and BatchNorm weights from weight decay
-        # decay_params = [p for n, p in model.named_parameters()
-        #                 if p.requires_grad and not any(nd in n for nd in ['bias', 'bn'])]
-        # no_decay_params = [p for n, p in model.named_parameters()
-        #                     if p.requires_grad and any(nd in n for nd in ['bias', 'bn'])]
         decay_params, no_decay_params = [], []
 
         for module in model.modules():
@@ -282,14 +278,16 @@ class Trainer:
         self.logger.info(f"Loading model from {checkpoint_path}.")
         checkpoint_data = torch.load(checkpoint_path, map_location=self.device)
 
-        # Re-instate the training step counter, model weights, and optimizer state from the checkpoint data
-        # read in from disk
-        self.step = checkpoint_data["step"]
-        self.model.load_state_dict(checkpoint_data["model"])
-        self.opt.load_state_dict(checkpoint_data["opt"])
-        self.scaler.load_state_dict(checkpoint_data["scaler"])
-
-        if self.reset_lr_scheduler:  # If True, do not load the prior learning rate scheduler state
+        if not self.reset_lr_scheduler: # Load all saved parameters from the last checkpoint
+            self.step = checkpoint_data["step"]
+            self.model.load_state_dict(checkpoint_data["model"])
+            self.opt.load_state_dict(checkpoint_data["opt"])
+            self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+            self.scaler.load_state_dict(checkpoint_data["scaler"])
+        else: # Re-define the learning rate scheduler
+            self.step = checkpoint_data["step"]
+            self.model.load_state_dict(checkpoint_data["model"])
+            # Skip loading the optimizer and scaler checkpoints as well
             for g in self.opt.param_groups:  # Make sure the optimizer learning rates match the new scheduler
                 g["lr"] = self.lr_start
 
@@ -299,10 +297,7 @@ class Trainer:
             msg += f"lr_end={self.lr_end} over {self.train_num_steps - self.step} steps"
             self.logger.info(msg)
             self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
-                                      total_iters=self.train_num_steps - self.step, last_epoch=-1)
-
-        else:  # If not resetting the LR scheduler, then load in the state dict to re-store it
-            self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+                                      total_iters=self.train_num_steps - self.step)
 
         # Losses are not loaded in, they are saved to disk periodically with the model weights and are not
         # needed to continue training. The losses obtained by training will be cached again at the next save
