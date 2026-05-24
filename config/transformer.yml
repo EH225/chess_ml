@@ -1,5 +1,4 @@
 # This config file is for the Transformer-based chess agent model
-model: "Transformer" # Name of the model being trained, determines the output directory name
 model_class: "Transformer" # Should match one of the model classes in core/torch_models.py
 
 output:

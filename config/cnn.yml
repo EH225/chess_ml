@@ -1,5 +1,4 @@
 # This config file is for the CNN-based chess agent model
-model: "CNN" # Name of the model being trained, determines the output directory name
 model_class: "CNN" # Should match one of the model classes in core/torch_models.py
 
 output:
@@ -15,7 +14,7 @@ training: # Specifies the imitation learning, supervised training parameters
     lr_start: 2.0e-3
     lr_end: 5.0e-6
     weight_decay: 1.0e-2
-    train_num_steps: 300000
+    train_num_steps: 500000
     grad_clip: 1.0
     eval_every: 5000
     save_every: 5000

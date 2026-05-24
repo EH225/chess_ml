@@ -1,5 +1,4 @@
 # This config file is for the MLP-based chess agent model
-model: "MLP" # Name of the model being trained, determines the output directory name
 model_class: "MLP" # Should match one of the model classes in core/torch_models.py
 
 output:

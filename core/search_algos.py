@@ -63,16 +63,19 @@ def max_depth(node):
 ########################
 # TODO: Section marker
 
-def null_search(state: str, model, **kwargs) -> Tuple[int, float, np.ndarray, Tuple[int]]:
+def null_search(state: str, model, temp, float = 1.0, **kwargs) -> Tuple[int, float, np.ndarray, Tuple[int]]:
     """
     Does not perform any searching, the input state is passed directly to the model and the results are then
     used to select a move immediately. This search function is included so that frameworks which expect a
     search algo to be used can call this one, even when no searching is desired (for speed). This search
-    function uses the argmax legal move from the policy head outputs as its selected move.
+    function randomly selects a legal move from the policy head logits based on their relative size vs one
+    another. Use temp -> +inf for purely greedy selection.
 
     :param state: A FEN string denoting the current game state.
     :param model: A model that produces policy logits and a value estimate for a given input state i.e. a FEN
         from the perspective of the player whose turn it is to go next.
+    :param temp: Sets a temperature scaling for move selection from the logits where larger temps > 1 lead
+        to a more greedy selection and smaller temps < 1 lead to more random / uniform selections.
     :return:
         - best_action (int): The best action found in the search process i.e. an int [0, 1967]. 9999 is a
             NA placeholder used if no action is possible since the input state is terminal.
@@ -101,8 +104,12 @@ def null_search(state: str, model, **kwargs) -> Tuple[int, float, np.ndarray, Tu
     mask[legal_indices] = True
     policy_logits[0, ~mask] = float('-inf') # Mask illegal move logits using -inf
 
-    # Pick the best move greedily from the policy logits over the legal candidate moves
-    best_action = policy_logits[0].argmax().item()
+    # Pick which move to make probabilistically based on the policy logits and in combination with a temp,
+    # this helps the model have fewer 3-fold repition outcomes by making potentially different selections
+    # when presented with the same board more than once
+    probs = torch.softmax(policy_logits[0] / temp, dim=0)
+    best_action = torch.multinomial(probs, 1).item()
+    # best_action = policy_logits[0].argmax().item()
 
     return best_action, value_estimate.item(), np.zeros(0), (1, 0, 0)
 
