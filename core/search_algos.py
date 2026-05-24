@@ -63,7 +63,7 @@ def max_depth(node):
 ########################
 # TODO: Section marker
 
-def null_search(state: str, model, temp, float = 1.0, **kwargs) -> Tuple[int, float, np.ndarray, Tuple[int]]:
+def null_search(state: str, model, temp: float = 1.0, **kwargs) -> Tuple[int, float, np.ndarray, Tuple[int]]:
     """
     Does not perform any searching, the input state is passed directly to the model and the results are then
     used to select a move immediately. This search function is included so that frameworks which expect a
