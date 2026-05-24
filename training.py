@@ -243,7 +243,7 @@ class Trainer:
         self.restart_scheduler = restart_scheduler
         if self.restart_scheduler:
             self.logger.info(f"Restarting LR scheduler, continuing from step={self.step} with new peak LR")
-            new_peak_lr = self.lr_start * 0.1  # Set the new peak learning rate to something much less
+            new_peak_lr = self.lr_start * 0.05  # Set the new peak learning rate to something much less
             total_additional_steps = self.train_num_steps - self.step
             warmup_steps = 2000  # Add a short warmup to avoid shocking the optimizer
 
