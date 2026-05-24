@@ -286,19 +286,20 @@ class Trainer:
         self.step = checkpoint_data["step"]
         self.model.load_state_dict(checkpoint_data["model"])
         self.opt.load_state_dict(checkpoint_data["opt"])
-        if "scaler" in checkpoint_data:
-            self.scaler.load_state_dict(checkpoint_data["scaler"])
-        if self.reset_lr_scheduler:  # If True, do not load the prior learning rate scheduler state
-            for g in self.opt.param_groups:  # Make sure the optimizer learning rates match the new scheduler
-                g["lr"] = self.lr_start
+        self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+        self.scaler.load_state_dict(checkpoint_data["scaler"])
 
-            # Instead of loading the prior learning rate scheduler from disk, create a new one according to
-            # the new config provided to continue training after the prior end
-            self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
-                                      total_iters=self.train_num_steps - self.step, last_epoch=-1)
+        # if self.reset_lr_scheduler:  # If True, do not load the prior learning rate scheduler state
+        #     for g in self.opt.param_groups:  # Make sure the optimizer learning rates match the new scheduler
+        #         g["lr"] = self.lr_start
 
-        else:  # If not resetting the LR scheduler, then load in the state dict to re-store it
-            self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+        #     # Instead of loading the prior learning rate scheduler from disk, create a new one according to
+        #     # the new config provided to continue training after the prior end
+        #     self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
+        #                               total_iters=self.train_num_steps - self.step, last_epoch=-1)
+
+        # else:  # If not resetting the LR scheduler, then load in the state dict to re-store it
+        #     self.scheduler.load_state_dict(checkpoint_data["scheduler"])
 
         # Losses are not loaded in, they are saved to disk periodically with the model weights and are not
         # needed to continue training. The losses obtained by training will be cached again at the next save
