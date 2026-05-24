@@ -123,7 +123,7 @@ class Trainer:
                  train_num_steps: int = 300000, adam_betas: Tuple[float] = (0.9, 0.99),
                  grad_clip: float = 1.0, eval_every: int = 5000, save_every: int = 10000,
                  results_folder: str = None, use_amp: bool = False, use_latest_checkpoint: bool = True,
-                 reset_lr_scheduler: bool = False, **kwargs):
+                 restart_scheduler: bool = False, **kwargs):
         """
         This is a framework for training a deep policy-value network model. This class wrapper has methods
         for loading a model from a recent checkpoint, saving a model periodically during training, and
@@ -144,10 +144,8 @@ class Trainer:
         :param use_amp: Whether to use automatic mixed-precision type casting during training.
         :param use_latest_checkpoint: If set to True, then the latest checkpoint detected in the results
             directory will be loaded in before training begins to pick up from where it was last left off.
-        :param reset_lr_scheduler: If set to True, then the learning rate scheduler is reset if the load
-            method is called. This allows us to continue training further by configuring a new learning rate
-            annealing scheduler. Note, this makes it so that we do not have a learning rate warm-up. For
-            continuity with prior training, it is recommended that the new lr_start == prior lr_end.
+        :param restart_scheduler: If set to True, then the learning rate scheduler will be reset to allow
+            for additional training.
         """
         super().__init__()
 
@@ -221,7 +219,6 @@ class Trainer:
 
         self.scaler = torch.amp.GradScaler('cuda')
 
-        self.reset_lr_scheduler = reset_lr_scheduler
         self.lr_start, self.lr_end = lr_start, lr_end
         warmup_steps = 5000  # Slowly ramp up the learning rate from very low to peak
         warmup = LinearLR(self.opt, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps)
@@ -241,6 +238,24 @@ class Trainer:
                 last_checkpoint = max([int(x.replace("model-", "").replace(".pt", ""))
                                        for x in checkpoints if x.endswith(".pt")])
                 self.load(last_checkpoint)  # Load in the most recent milestone to continue training
+
+        # If True, reset the learning rate scheduler to continue training further
+        self.restart_scheduler = restart_scheduler
+        if self.restart_scheduler:
+            self.logger.info(f"Restarting LR scheduler, continuing from step={self.step} with new peak LR")
+            new_peak_lr = self.lr_start * 0.30  # Set the new peak learning rate to something much less
+            total_additional_steps = self.train_num_steps - self.step
+            warmup_steps = 2000  # Add a short warmup to avoid shocking the optimizer
+
+            # Override the LR in the loaded optimizer state
+            for group in self.opt.param_groups:
+                group["lr"] = new_peak_lr * 0.01  # start warmup from near-zero
+
+            warmup = LinearLR(self.opt, start_factor=0.01, end_factor=1.0, total_iters=warmup_steps)
+            decay = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / new_peak_lr,
+                             total_iters=total_additional_steps - warmup_steps)
+            self.scheduler = SequentialLR(self.opt, schedulers=[warmup, decay], milestones=[warmup_steps])
+
 
     def save(self, milestone: int) -> None:
         """
@@ -277,29 +292,11 @@ class Trainer:
         checkpoint_path = os.path.join(self.checkpoints_folder, f"model-{milestone}.pt")
         self.logger.info(f"Loading model from {checkpoint_path}.")
         checkpoint_data = torch.load(checkpoint_path, map_location=self.device)
-
-        if not self.reset_lr_scheduler: # Load all saved parameters from the last checkpoint
-            self.step = checkpoint_data["step"]
-            self.model.load_state_dict(checkpoint_data["model"])
-            self.opt.load_state_dict(checkpoint_data["opt"])
-            self.scheduler.load_state_dict(checkpoint_data["scheduler"])
-            self.scaler.load_state_dict(checkpoint_data["scaler"])
-        else: # Re-define the learning rate scheduler
-            self.step = checkpoint_data["step"]
-            self.model.load_state_dict(checkpoint_data["model"])
-            self.scaler.load_state_dict(checkpoint_data["scaler"])
-            # Skip loading the optimizer checkpoints as well
-            for g in self.opt.param_groups:  # Make sure the optimizer learning rates match the new scheduler
-                g["lr"] = self.lr_start
-
-            # Instead of loading the prior learning rate scheduler from disk, create a new one according to
-            # the new config provided to continue training after the prior end
-            msg = f"Creating a new learning rate scheduler object, lr_start={self.lr_start}, "
-            msg += f"lr_end={self.lr_end} over {self.train_num_steps - self.step} steps"
-            self.logger.info(msg)
-            self.scheduler = LinearLR(self.opt, start_factor=1.0, end_factor=self.lr_end / self.lr_start,
-                                      total_iters=self.train_num_steps - self.step)
-
+        self.step = checkpoint_data["step"]
+        self.model.load_state_dict(checkpoint_data["model"])
+        self.opt.load_state_dict(checkpoint_data["opt"])
+        self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+        self.scaler.load_state_dict(checkpoint_data["scaler"])
         # Losses are not loaded in, they are saved to disk periodically with the model weights and are not
         # needed to continue training. The losses obtained by training will be cached again at the next save
 

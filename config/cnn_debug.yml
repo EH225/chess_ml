@@ -20,4 +20,4 @@ training: # Specifies the imitation learning, supervised training parameters
     save_every: 50
     use_amp: True
     use_latest_checkpoint: True
-    reset_lr_scheduler: False
+    restart_scheduler: False
