@@ -287,7 +287,8 @@ class Trainer:
         else: # Re-define the learning rate scheduler
             self.step = checkpoint_data["step"]
             self.model.load_state_dict(checkpoint_data["model"])
-            # Skip loading the optimizer and scaler checkpoints as well
+            self.scaler.load_state_dict(checkpoint_data["scaler"])
+            # Skip loading the optimizer checkpoints as well
             for g in self.opt.param_groups:  # Make sure the optimizer learning rates match the new scheduler
                 g["lr"] = self.lr_start
 
