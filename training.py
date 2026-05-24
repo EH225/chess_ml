@@ -242,7 +242,8 @@ class Trainer:
         if use_latest_checkpoint:
             checkpoints = os.listdir(self.checkpoints_folder)
             if len(checkpoints) > 0:
-                last_checkpoint = max([int(x.replace("model-", "").replace(".pt", "")) for x in checkpoints])
+                last_checkpoint = max([int(x.replace("model-", "").replace(".pt", ""))
+                                       for x in checkpoints if x.endswith(".pt")])
                 self.load(last_checkpoint)  # Load in the most recent milestone to continue training
 
     def save(self, milestone: int) -> None:
