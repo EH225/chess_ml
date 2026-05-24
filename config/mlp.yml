@@ -6,16 +6,16 @@ output:
 
 model:
     n_blocks: 12
-    hidden_size: 128
+    hidden_size: 256
     dropout: 0.2
 
 training: # Specifies the imitation learning, supervised training parameters
     batch_size: 1024
-    lr_start: 2.0e-3
+    lr_start: 5.0e-3
     lr_end: 5.0e-6
     weight_decay: 1.0e-2
-    train_num_steps: 300000
-    grad_clip: 1.0
+    train_num_steps: 600000
+    grad_clip: 3.0
     eval_every: 5000
     save_every: 5000
     use_amp: True
