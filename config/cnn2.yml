@@ -11,10 +11,10 @@ model:
 
 training: # Specifies the imitation learning, supervised training parameters
     batch_size: 1024
-    lr_start: 5.0e-4
-    lr_end: 1.0e-5
+    lr_start: 1.18e-5
+    lr_end: 1.0e-6
     weight_decay: 1.0e-2
-    train_num_steps: 600000
+    train_num_steps: 800000
     grad_clip: 1.0
     eval_every: 5000
     save_every: 5000
