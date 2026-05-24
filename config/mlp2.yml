@@ -1,0 +1,23 @@
+# This config file is for the MLP-based chess agent model
+model_class: "MLP" # Should match one of the model classes in core/torch_models.py
+
+output:
+    output_path: &output_path "results/MLP/" # Directory of training results
+
+model:
+    n_blocks: 12
+    hidden_size: 128
+    dropout: 0.2
+
+training: # Specifies the imitation learning, supervised training parameters
+    batch_size: 1024
+    lr_start: 1.18e-5
+    lr_end: 1.0e-6
+    weight_decay: 1.0e-2
+    train_num_steps: 800000
+    grad_clip: 1.0
+    eval_every: 5000
+    save_every: 5000
+    use_amp: True
+    use_latest_checkpoint: True
+    reset_lr_scheduler: True
