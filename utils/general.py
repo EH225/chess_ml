@@ -236,11 +236,12 @@ def generate_loss_plots(loss_dir: str, save_dir: str) -> None:
     train_loss, val_loss = [], []
 
     for filename in os.listdir(loss_dir):
-        df = pd.read_csv(os.path.join(loss_dir, filename), index_col=0)
-        if filename.split("-")[0] == "train":
-            train_loss.append(df)
-        else:
-            val_loss.append(df)
+        if filename.endswith(".csv"):
+            df = pd.read_csv(os.path.join(loss_dir, filename), index_col=0)
+            if filename.split("-")[0] == "train":
+                train_loss.append(df)
+            else:
+                val_loss.append(df)
 
     # 2). Convert from lists of dataframes into 1 consolidated dataframe, sort by train step
     train_loss = pd.concat(train_loss).sort_values("step")
