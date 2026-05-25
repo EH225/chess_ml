@@ -75,7 +75,8 @@ def null_search(state: str, model, temp: float = 1.0, **kwargs) -> Tuple[int, fl
     :param model: A model that produces policy logits and a value estimate for a given input state i.e. a FEN
         from the perspective of the player whose turn it is to go next.
     :param temp: Sets a temperature scaling for move selection from the logits where larger temps > 1 lead
-        to a more greedy selection and smaller temps < 1 lead to more random / uniform selections.
+        to more random / uniform selection, while lower temperatures lead to greedy selection. Higher temp
+        means higher entropy.
     :return:
         - best_action (int): The best action found in the search process i.e. an int [0, 1967]. 9999 is a
             NA placeholder used if no action is possible since the input state is terminal.
@@ -92,7 +93,7 @@ def null_search(state: str, model, temp: float = 1.0, **kwargs) -> Tuple[int, fl
         value = -1 if env.board.is_checkmate() else 0
         return 9999, value, np.zeros(0), (1, 0, 1)
 
-    with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+    with torch.no_grad():
         policy_logits, value_estimate = model([state, ])
 
     # Determine the best action
@@ -176,7 +177,7 @@ def naive_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, **
     value_estimates = []
     for state_batch in state_batches:  # Compute the value estimates in batches to minimize runtime
         # Disable grad-tracking, not needed since no gradient step being taken, use bfloat16 dtypes
-        with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+        with torch.no_grad():
             policy_logits,  v_est = model(state_batch)
             v_est = v_est.cpu().float().reshape(-1).tolist()
         value_estimates.extend(v_est)  # Aggregate the state value estimates into 1 linear list
@@ -359,7 +360,7 @@ def minimax_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, 
         # placeholder since an integer is expected to be returned
         return 9999, root.reward, np.zeros(0), (1, 0, 1)
     elif horizon == 0:  # If the horizon is zero, then use the model to evaluate and return that value
-        with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+        with torch.no_grad():
             policy_logits, val_est = model([state, ])
             val_est = val_est.cpu().float().reshape(-1).tolist()[0]
         return 9999, val_est, np.zeros(0), (1, 0, 0)
@@ -434,7 +435,7 @@ def minimax_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, 
             # If the eval_batch has reached batch_size or if the node_stack for further exploration is
             # depleted, then evaluate the nodes contained in eval_batch and update the tree accordingly
             state_batch = [node.state for node in eval_batch]  # Extract a list of FEN state encodings (str)
-            with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+            with torch.no_grad():
                 policy_logits, value_batch = model(state_batch) # Fwd pass through the model
                 policy_logits = policy_logits.cpu().float().numpy() # (batch_size, 1968)
                 value_batch = value_batch.cpu().float().reshape(-1).tolist() # (batch_size, )
@@ -654,6 +655,7 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
         - info (Tuple[int]): The total number of nodes evaluated, the max depth of the search tree and how
             many terminal game state nodes were visited.
     """
+    assert isinstance(n_iters, int) and n_iters >= 1, "n_iters must be an int >= 1"
     initial_state = state # Keep a copy of the initial state for later
     cache = {}  # Cache the outputs from the model, if we send it the same state 2x re-use prior values
     terminal_nodes = 0  # Count how many of the nodes reached were terminal
@@ -662,9 +664,10 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
     if root.is_terminal:  # If the input state is a terminal state, no searching required, board value known
         return 9999, root.terminal_reward, np.zeros(0), (1, 0, 1)
     else:  # Expand the root node to get first generation child nodes
+        nodes_selected += 1
         root.increment_virtual_loss() # Select the root node as the first to be expanded
 
-        with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+        with torch.no_grad(): # Gradient tracking not needed
             policy_logits, value_batch = model([state])
             p_logits = policy_logits.cpu().float().numpy().reshape(-1) # (1968, )
             val_est = value_batch.cpu().float().reshape(-1).tolist()  # (batch_size, )
@@ -672,15 +675,13 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
         root.expand_legal_moves(p_logits)
         root.backup(val_est[0])
 
-    selections_remaining = min(batch_size, n_iters - nodes_selected)
-    for k in range(selections_remaining):  # Run a batched MC process for batched model forward passes
+    while nodes_selected < n_iters: # Loop until n_iter nodes have been selected in total
+        selections_remaining = min(batch_size, n_iters - nodes_selected)  # Determine size of next batch
         leaf_nodes = []  # Record leaf nodes to be passed to the model for batched evaluation
+        for k in range(selections_remaining):  # Run a batched MC process for batched model forward passes
 
-        # 1). Select leaf nodes for expansion in batches for batched evaluation through model(state_batch)
-        for k in range(batch_size):  # Make batch_size leaf node selections
-
+            # 1). Select leaf nodes for expansion in batches for batched evaluation through model(state_batch)
             node = root  # All paths in the tree begin at the root node
-
             while node.is_expanded and not node.is_terminal:  # Traverse down the tree through the nodes that
                 # have already been visited before (expanded) and stop when we reach a node that is either
                 # terminal (visited but no children) or unvisited (unexpanded). Select the next action
@@ -705,8 +706,9 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
                 cache[leaf_node.state_] = None  # Add a placeholder in the cache, this will prevent us from
                 # running duplicative states through the model for leaf nodes within the current leaf batch
 
-        with torch.no_grad(), torch.autocast(device_type=model.get_device(), dtype=get_amp_dtype()):
+        with torch.no_grad():
             policy_logits, value_batch = model(state_batch)
+
         policy_logits = policy_logits.cpu().float().numpy() # (batch_size, 1968)
         value_batch = value_batch.cpu().float().reshape(-1).tolist()  # (batch_size, )
 

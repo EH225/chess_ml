@@ -15,6 +15,7 @@ import torch, chess
 import torch.nn as nn
 import torch.nn.functional as F
 from utils.chess_env import relative_material_diff
+from utils.general import read_yaml, get_device
 from typing import Tuple, List, Dict
 
 torch.backends.mkldnn.enabled = True  # Usually enabled, but set to be sure
@@ -630,3 +631,33 @@ class Transformer(nn.Module):
             policy_logits = self.policy_head(x)
             value_estimates = self.value_head(x).squeeze(1)  # (batch_size, )
             return policy_logits, value_estimates
+
+
+def load_model(config_name: str, checkpoint: int = None):
+    """
+    Loads in a cached model from disk pertaining to a particular config. This function will raise an error
+    if there are no saved weights cached to disk for the config_name provided.
+
+    :param config_name: The name of the config for which to load a model.
+    :param checkpoint: The checkpoint milestone as an int to read from cache. If None, then the latest
+        checkpoint available will be loaded.
+    :returns: A model instance defined by the config_name specified with weights loaded if available.
+    """
+    config = read_yaml(os.path.join(PARENT_DIR, f"config/{config_name}.yml"))
+    model_class_dict = {"MLP": MLP, "CNN": CNN, "Transformer": Transformer}
+    model_class = model_class_dict[config["model_class"]]
+    model = model_class(config)  # Init the model using the config file
+
+    if checkpoint is None: # Auto-detect the latest checkpoint if not specified
+        checkpoint_dir = os.path.join(PARENT_DIR, config["output"]["output_path"], "checkpoints")
+        file_names = os.listdir(checkpoint_dir)
+        candidates = [int(x.replace("model-", "").rstrip(".pt")) for x in file_names]
+        assert len(candidates) > 0, f"No checkpoint files detected on disk at {checkpoint_dir}"
+        checkpoint = max(candidates)
+
+    checkpoint_path = os.path.join(PARENT_DIR, config["output"]["output_path"],
+                                   "checkpoints", f"model-{checkpoint}.pt")
+    checkpoint_data = torch.load(checkpoint_path, map_location=get_device())
+    model.load_state_dict(checkpoint_data["model"])
+    print("Loaded:", config["model_class"], "checkpoint", checkpoint)
+    return model
