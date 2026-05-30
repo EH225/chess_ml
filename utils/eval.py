@@ -18,8 +18,10 @@ else:
 
 import chess
 import chess.engine
-from typing import Callable
-
+import numpy as np
+import pandas as pd
+from typing import Callable, Dict
+from utils.general import create_move_to_idx_map
 
 def play_game(model, search_algo, search_kwargs, engine, model_plays_white=True,
               stockfish_elo=1320, idx_to_move=None):
@@ -123,3 +125,66 @@ def evaluate_vs_stockfish(model, search_algo, search_kwargs, stockfish_path,
     engine.quit()
     return (model_wins, model_losses, draws), score
 
+
+def play_game_dask(model, search_algo: Callable, search_kwargs: Dict, stockfish_path:str,
+                   stockfish_elo: int = 1320, model_plays_white: bool = True, idx_to_move: Dict = None,
+                   save_dir: str = None, game_int: int = None):
+    """
+    ## TODO: Update this doc strong at some point
+    This function simulates 1 game where the input model plays vs a given engine and returns a summary of the
+    result.
+
+    :param model: An input model to play vs the engine.
+    :param search_algo: A callable search algorithm used in conjunction with model to select moves to play vs
+        the engine.
+    :param search_kwargs: Additional kwargs to pass along with the current board FEN and a pointer to model
+        when calling search_algo. This can contain e.g. n_iters which governs how the search function behaves
+        or how deep it searches.
+    :param engine: A stockfish engine instance to play vs the model.
+    :param model_plays_white: Determines if the model should play as white.
+    :param stockfish_elo: Sets the ELO strength rating of the stockfish engine. The min value is 1320.
+    :param idx_to_move: A dictionary mapping integer index values [0, 1967] to uci moves strings.
+    :returns: The board result, the final FEN, and a name for what the game outcome was.
+    """
+    start_time = time.time()
+    assert save_dir is not None, "save_dir must be specified"
+    assert game_int is not None, "game_int must be specified"
+    idx_to_move = {v:k for k,v in create_move_to_idx_map()} if idx_to_move is None else idx_to_move
+    out = pd.Series() # Collect values to be saved to disk at the end
+    out["model_name"] = model.name
+    out["search_algo"] = search_algo.__name__
+    for k, v in search_kwargs.items():
+        out[k] = v
+    out["stockfish_elo"] = stockfish_elo
+
+    board = chess.Board() # Instantiate a new game board at the starting positions
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path) # Init the engine
+    engine.configure({"UCI_LimitStrength": True, "UCI_Elo": stockfish_elo})
+    model_color = chess.WHITE if model_plays_white else chess.BLACK
+    out["model_color"] = "white" if model_color is chess.WHITE else "black"
+
+    while not board.is_game_over(): # Run until the game ends
+        # Check if the model should play, i.e. it's white's turn and the model plays as white
+        # or it's black's turn and the model plays as black.
+        if board.turn is model_color: # Generate a new move from the model and play it
+            best_idx, _, _, _ = search_algo(board.fen(), model, **search_kwargs)
+            move = chess.Move.from_uci(idx_to_move[best_idx])
+        else: # Select a move from the Stockfish engine
+            result = engine.play(board, chess.engine.Limit(nodes=100000))
+            move = result.move
+        board.push(move) # Play this move on the boad
+
+    # board.result returns: "1-0", "0-1", "1/2-1/2" for win, loss, draw where the first number is
+    # for white, the second is for black always
+    result = board.result()
+    if result == "1/2-1/2":
+        out["result"] = "draw"
+    elif (result == "1-0" and model_plays_white) or (result == "0-1" and not model_plays_white):
+        out["result"] = "win"
+    else:
+        out["result"] = "loss"
+    out["outcome"] = board.outcome().termination.name
+    out["fen"] = board.fen()
+    out["runtime"] = time.time() - start_time
+    out.to_frame().T.to_csv(os.path.join(save_dir, f"game_{game_int}.csv"))
+    engine.quit()

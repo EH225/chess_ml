@@ -88,6 +88,7 @@ class MLP(nn.Module):
         estimates for each input state.
         """
         super().__init__()
+        self.name = "MLP"
         config = {"model": {}} if config is None else config
         self.n_blocks = int(config["model"].get("n_blocks", 12))
         self.hidden_size = int(config["model"].get("hidden_size", 256))
@@ -282,6 +283,7 @@ class CNN(nn.Module):
             B). A (batch_size, 1968) policy vector of logits over all possible UCI moves
         """
         super().__init__()
+        self.name = "CNN"
         config = {"model": {}} if config is None else config
         self.n_blocks = int(config["model"].get("n_blocks", 12))
         self.channels = int(config["model"].get("channels", 128))
@@ -466,6 +468,7 @@ class Transformer(nn.Module):
         estimates for each input state.
         """
         super().__init__()
+        self.name = "Transformer"
         config = {"model": {}} if config is None else config
         # Extract config parameters from the passed model config dictionary
         self.hidden_size = int(config["model"].get("hidden_size", 256))
