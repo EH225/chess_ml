@@ -203,6 +203,16 @@ def get_lan_ip():
     finally:
         s.close()
 
+def setup_path(dask_worker):
+    """
+    This function is used to make sure all dask workers have the correct python path configured.
+    """
+    import sys, os
+    CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
+    PARENT_DIR = os.path.dirname(CURRENT_DIR)
+    if PARENT_DIR not in sys.path:
+        sys.path.insert(0, PARENT_DIR)
+
 
 def get_amp_dtype(device: str = "cuda"):
     """
