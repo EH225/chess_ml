@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Dict
 from utils.general import create_move_to_idx_map
+from core.torch_models import load_model
+
 
 def play_game(model, search_algo, search_kwargs, engine, model_plays_white=True,
               stockfish_elo=1320, idx_to_move=None):
@@ -126,34 +128,56 @@ def evaluate_vs_stockfish(model, search_algo, search_kwargs, stockfish_path,
     return (model_wins, model_losses, draws), score
 
 
-def play_game_dask(model, search_algo: Callable, search_kwargs: Dict, stockfish_path:str,
-                   stockfish_elo: int = 1320, model_plays_white: bool = True, idx_to_move: Dict = None,
-                   save_dir: str = None, game_int: int = None):
+def play_game_dask(config_name: str, search_algo: Callable, search_kwargs: Dict, stockfish_path: str,
+                   stockfish_elo: int = 1320, model_plays_white: bool = True, save_dir: str = None,
+                   game_int: int = None) -> None:
     """
-    ## TODO: Update this doc strong at some point
-    This function simulates 1 game where the input model plays vs a given engine and returns a summary of the
-    result.
+    This function loads the model associated with config_name and plays a match against stockfish at a
+    given elo rating to assess the model's strength and saves a summary of the game to csv. The cached
+    output includes:
+        model_name: The name of the model class e.g. "cnn"
+        earch_algo: The name of the search algo function used e.g. naive_search
+        search_kwargs: Each key-value pair in the input search_kwargs is recorded
+        stockfish_elo: The elo rating of the stockfish opponent the game was played against
+        model_color: The color that model played i.e. either "white" or "black"
+        result: The game result for the model, either "win", "draw", "loss"
+        outcome: The game outcome, which will be CHECKMATE for win or loss or e.g. STALEMATE for certain
+            draw outcomes. This field is informative for understanding the different types of draws.
+        fen: The final FEN state encoding the game ended on for potential board analysis.
+        runtime: The total time in seconds it took to run the game in its entirity.
 
-    :param model: An input model to play vs the engine.
+    This function is meant to be run in parallel using dask to speed up evaluations. It therefore attempts
+    to transfer a little data as possible between the scheduler and worker threads to minimize overhead e.g.
+    the model is loaded in each task, not transfered through the task graph. Additionally, this function saves
+    the results to csv after running to make sure that partial results are recorded even if the overall dask
+    cluster crashes for some reason during computation or to allow for evals to be paused and resumed later.
+
+    :param config_name: The name of a config file that will be used to load in the model from disk.
     :param search_algo: A callable search algorithm used in conjunction with model to select moves to play vs
         the engine.
     :param search_kwargs: Additional kwargs to pass along with the current board FEN and a pointer to model
         when calling search_algo. This can contain e.g. n_iters which governs how the search function behaves
         or how deep it searches.
-    :param engine: A stockfish engine instance to play vs the model.
-    :param model_plays_white: Determines if the model should play as white.
+    :param stockfish_path: A file path to the stockfish executable so that a new stockfish instance can be
+        launched for this evaluation.
     :param stockfish_elo: Sets the ELO strength rating of the stockfish engine. The min value is 1320.
-    :param idx_to_move: A dictionary mapping integer index values [0, 1967] to uci moves strings.
-    :returns: The board result, the final FEN, and a name for what the game outcome was.
+    :param model_plays_white: True if the model should play as white, otherwise False.
+    :param save_dir: The output directory to save the results to when finished.
+    :param game_int: A unique integer for this game which will be used to name the output file e.g.
+        game_15.csv, this should be chosen to avoid collisions.
+    :returns: None, caches the results to disk instead to avoid data loss incase a dask cluster crashes.
     """
-    start_time = time.time()
+    start_time = time.time() # Track the total time it takes to run this function
     assert save_dir is not None, "save_dir must be specified"
     assert game_int is not None, "game_int must be specified"
-    idx_to_move = {v:k for k,v in create_move_to_idx_map()} if idx_to_move is None else idx_to_move
+    # Create a dictionary mapping integer index values [0, 1967] to uci moves strings
+    idx_to_move = {v:k for k,v in create_move_to_idx_map().items()}
     out = pd.Series() # Collect values to be saved to disk at the end
+    model = load_model(config_name) # Load in the model associated with the config_name given
+    model.eval() # Switch to eval mode for testing
     out["model_name"] = model.name
     out["search_algo"] = search_algo.__name__
-    for k, v in search_kwargs.items():
+    for k, v in search_kwargs.items(): # Record the search kwargs used to run the search function
         out[k] = v
     out["stockfish_elo"] = stockfish_elo
 
