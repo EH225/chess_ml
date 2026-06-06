@@ -12,3 +12,4 @@ This repository contains code for training an AI chess agent using supervised im
     - `general.py`: This module contains general utility functions used throughout the repo.
     - `init_worker`: This module helps run dask workers in parallel for model evaluations.
 - `training.py`: This module is the main driver script for running supervised imitation learning for each model.
+- `environment.yml`: This file contains the specifications of the conda env that was used throughout this project.
