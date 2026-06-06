@@ -651,7 +651,7 @@ def load_model(config_name: str, checkpoint: int = None):
     model_class = model_class_dict[config["model_class"]]
     model = model_class(config)  # Init the model using the config file
 
-    if checkpoint is None: # Auto-detect the latest checkpoint if not specified
+    if checkpoint is None:  # Auto-detect the latest checkpoint if not specified
         checkpoint_dir = os.path.join(PARENT_DIR, config["output"]["output_path"], "checkpoints")
         file_names = os.listdir(checkpoint_dir)
         candidates = [int(x.replace("model-", "").rstrip(".pt")) for x in file_names]

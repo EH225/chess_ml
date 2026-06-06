@@ -1,5 +1,6 @@
 """
-This module creates a simple interface for interacting with a chess game environment.
+This module creates a simple interface for interacting with a chess game environment which wraps the
+chess.Board class from python-chess.
 """
 import sys, os
 

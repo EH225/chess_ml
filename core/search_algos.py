@@ -17,8 +17,9 @@ from utils.general import create_move_to_idx_map, get_amp_dtype, get_device
 from scipy.special import softmax
 from typing import Tuple, List, Callable, Optional
 
-RNG = np.random.default_rng() # Random number generator, create it once and used it multiple times
+RNG = np.random.default_rng()  # Random number generator, create it once and used it multiple times
 MOVE_TO_IDX = create_move_to_idx_map()
+
 
 ########################
 ### Helper Functions ###
@@ -93,26 +94,27 @@ def null_search(state: str, model, temp: float = 1.0, **kwargs) -> Tuple[int, fl
         value = -1 if env.board.is_checkmate() else 0
         return 9999, value, np.zeros(0), (1, 0, 1)
 
-    with torch.no_grad():
+    with torch.no_grad():  # Run the current state through the trained model to generate logits
         policy_logits, value_estimate = model([state, ])
+        policy_logits, value_estimate = policy_logits[0], value_estimate.item()
 
-    # Determine the best action
-    board = chess.Board(state)
+    # Determine the best action from the policy_logits
+    action_values = np.array([policy_logits[MOVE_TO_IDX[m.uci()]] for m in env.board.legal_moves])
 
-    # Mask illegal moves
-    legal_indices = [MOVE_TO_IDX[m.uci()] for m in board.legal_moves if m.uci() in MOVE_TO_IDX]
-    mask = torch.zeros(len(MOVE_TO_IDX), dtype=torch.bool)
-    mask[legal_indices] = True
-    policy_logits[0, ~mask] = float('-inf') # Mask illegal move logits using -inf
+    if temp == 0.0:  # Fully greedy selection, no sampling required
+        best_action = action_values.argmax()  # Index into board.legal_moves
+    else:
+        # Pick a move probabilistically based on the policy logits and in combination with a temp, this helps
+        # the model have fewer 3-fold repition outcomes by making potentially different selections when
+        # presented with the same board more than once
+        logits = action_values / temp
+        logits -= logits.max()  # For numerical stability
+        probs = np.exp(logits)  # Compute softmax normalization
+        probs /= probs.sum()
+        best_action = np.random.choice(len(probs), p=probs)
 
-    # Pick which move to make probabilistically based on the policy logits and in combination with a temp,
-    # this helps the model have fewer 3-fold repition outcomes by making potentially different selections
-    # when presented with the same board more than once
-    probs = torch.softmax(policy_logits[0] / temp, dim=0)
-    best_action = torch.multinomial(probs, 1).item()
-    # best_action = policy_logits[0].argmax().item()
-
-    return best_action, value_estimate.item(), np.zeros(0), (1, 0, 0)
+    best_action = env.get_move_idx(best_action)  # Convert to an int [0, 1967]
+    return best_action, value_estimate, action_values, (1, 0, 0)
 
 
 #########################
@@ -140,7 +142,7 @@ def naive_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, **
         - info (Tuple[int]): The total number of nodes evaluated, the max depth of the search tree and how
             many terminal game state nodes were visited.
     """
-    initial_state = state # Keep a copy of the initial state for later
+    initial_state = state  # Keep a copy of the initial state for later
     env = ChessEnv(initial_state=state)  # Instantiate the current game state
     if env.ep_ended:  # If the episode has already ended, then there is no searching over actions to be done
         # The value is always computed from the perspective of the player who is to move next in the state,
@@ -178,7 +180,7 @@ def naive_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, **
     for state_batch in state_batches:  # Compute the value estimates in batches to minimize runtime
         # Disable grad-tracking, not needed since no gradient step being taken, use bfloat16 dtypes
         with torch.no_grad():
-            policy_logits,  v_est = model(state_batch)
+            policy_logits, v_est = model(state_batch)
             v_est = v_est.cpu().float().reshape(-1).tolist()
         value_estimates.extend(v_est)  # Aggregate the state value estimates into 1 linear list
 
@@ -193,8 +195,8 @@ def naive_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, **
     state_value = action_values.max()  # Find the max value among the action values as the overall state value
     best_action = np.random.choice(np.where(action_values == state_value)[0])  # Randomly select from argmaxes
     env = ChessEnv(initial_state=initial_state)  # Instantiate the initial game state
-    best_action = env.get_move_idx(best_action) # Convert to an int [0, 1967]
-    return best_action, state_value, action_values, (1, len(action_values) + 1, terminal_nodes)
+    best_action = env.get_move_idx(best_action)  # Convert to an int [0, 1967]
+    return best_action, state_value, action_values, (len(action_values) + 1, 1, terminal_nodes)
 
 
 ######################################
@@ -296,14 +298,14 @@ class Node_MMS:
             node.
         :returns: None, the internal self.unexplored_actions list is updated.
         """
-        if len(self.unexplored_actions) == 0: # Skip if self.unexplored_actions is empty
+        if len(self.unexplored_actions) == 0:  # Skip if self.unexplored_actions is empty
             return None
         env = ChessEnv(initial_state=self.state)
         move_vals = [policy_logits[env.get_move_idx(action_idx)] for action_idx in self.unexplored_actions]
         actions = sorted([(val, idx) for val, idx in zip(move_vals, self.unexplored_actions)],
-                         key=lambda x: (x[0], x[1])) # Sort in ascending order by move value, exploration
+                         key=lambda x: (x[0], x[1]))  # Sort in ascending order by move value, exploration
         # occurs by popping from the end, so put the highest value moves at the end
-        self.unexplored_actions = [x[1] for x in actions] # Retain only the action_idx for each
+        self.unexplored_actions = [x[1] for x in actions]  # Retain only the action_idx for each
 
     def __str__(self) -> str:
         return self.state
@@ -350,7 +352,7 @@ def minimax_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, 
         - info (Tuple[int]): The total number of nodes evaluated, the max depth of the search tree and how
             many terminal game state nodes were visited.
     """
-    initial_state = state # Keep a copy of the initial state for later
+    initial_state = state  # Keep a copy of the initial state for later
     board = chess.Board(state)  # Compute the reward that would have been generated on the move prior to
     # reaching the current game state i.e. +1 reward for the prior player if the board is now a checkmate
     # and 0 otherwise (i.e. for intermediate moves or any kind of draw condition)
@@ -436,9 +438,9 @@ def minimax_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, 
             # depleted, then evaluate the nodes contained in eval_batch and update the tree accordingly
             state_batch = [node.state for node in eval_batch]  # Extract a list of FEN state encodings (str)
             with torch.no_grad():
-                policy_logits, value_batch = model(state_batch) # Fwd pass through the model
-                policy_logits = policy_logits.cpu().float().numpy() # (batch_size, 1968)
-                value_batch = value_batch.cpu().float().reshape(-1).tolist() # (batch_size, )
+                policy_logits, value_batch = model(state_batch)  # Fwd pass through the model
+                policy_logits = policy_logits.cpu().float().numpy()  # (batch_size, 1968)
+                value_batch = value_batch.cpu().float().reshape(-1).tolist()  # (batch_size, )
 
             for node, p_logits, value in zip(eval_batch, policy_logits, value_batch):  # Update the tree
                 # Record the value approximation of this node and deal with sign flipping to make the value
@@ -456,7 +458,7 @@ def minimax_search(state: str, model, batch_size: int = 64, gamma: float = 1.0, 
     state_value = action_values.max()  # Find the max value among the action values as the overall state value
     best_action = np.random.choice(np.where(action_values == state_value)[0])  # Randomly select from argmaxes
     env = ChessEnv(initial_state=initial_state)  # Instantiate the initial game state
-    best_action = env.get_move_idx(best_action) # Convert to an int [0, 1967]
+    best_action = env.get_move_idx(best_action)  # Convert to an int [0, 1967]
     return best_action, state_value, action_values, (count_total_nodes(root), max_depth(root), terminal_nodes)
 
 
@@ -656,7 +658,7 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
             many terminal game state nodes were visited.
     """
     assert isinstance(n_iters, int) and n_iters >= 1, "n_iters must be an int >= 1"
-    initial_state = state # Keep a copy of the initial state for later
+    initial_state = state  # Keep a copy of the initial state for later
     cache = {}  # Cache the outputs from the model, if we send it the same state 2x re-use prior values
     terminal_nodes = 0  # Count how many of the nodes reached were terminal
     nodes_selected = 0  # Count how many total nodes are expanded during MCTS
@@ -665,17 +667,17 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
         return 9999, root.terminal_reward, np.zeros(0), (1, 0, 1)
     else:  # Expand the root node to get first generation child nodes
         nodes_selected += 1
-        root.increment_virtual_loss() # Select the root node as the first to be expanded
+        root.increment_virtual_loss()  # Select the root node as the first to be expanded
 
-        with torch.no_grad(): # Gradient tracking not needed
+        with torch.no_grad():  # Gradient tracking not needed
             policy_logits, value_batch = model([state])
-            p_logits = policy_logits.cpu().float().numpy().reshape(-1) # (1968, )
+            p_logits = policy_logits.cpu().float().numpy().reshape(-1)  # (1968, )
             val_est = value_batch.cpu().float().reshape(-1).tolist()  # (batch_size, )
 
         root.expand_legal_moves(p_logits)
         root.backup(val_est[0])
 
-    while nodes_selected < n_iters: # Loop until n_iter nodes have been selected in total
+    while nodes_selected < n_iters:  # Loop until n_iter nodes have been selected in total
         selections_remaining = min(batch_size, n_iters - nodes_selected)  # Determine size of next batch
         leaf_nodes = []  # Record leaf nodes to be passed to the model for batched evaluation
         for k in range(selections_remaining):  # Run a batched MC process for batched model forward passes
@@ -709,7 +711,7 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
         with torch.no_grad():
             policy_logits, value_batch = model(state_batch)
 
-        policy_logits = policy_logits.cpu().float().numpy() # (batch_size, 1968)
+        policy_logits = policy_logits.cpu().float().numpy()  # (batch_size, 1968)
         value_batch = value_batch.cpu().float().reshape(-1).tolist()  # (batch_size, )
 
         # Update the cache with the new model outputs
@@ -735,9 +737,9 @@ def monte_carlo_tree_search(state: str, model, batch_size: int = 32, n_iters: in
     # Now that we have populated the MC tree, identify the best action and the estimated state value
     action_values = np.array([node.Q() for node in root.children])
     visit_counts = np.array([child.n_visits for child in root.children])
-    state_value = np.sum(action_values * visit_counts) / visit_counts.sum() # Take the weighted avg
+    state_value = np.sum(action_values * visit_counts) / visit_counts.sum()  # Take the weighted avg
     # best_action = np.argmax(action_values)
-    best_action = np.argmax(visit_counts) # Pick the best action based on the most visited first child
+    best_action = np.argmax(visit_counts)  # Pick the best action based on the most visited first child
     env = ChessEnv(initial_state=initial_state)  # Instantiate the initial game state
-    best_action = env.get_move_idx(best_action) # Convert to an int [0, 1967]
+    best_action = env.get_move_idx(best_action)  # Convert to an int [0, 1967]
     return best_action, state_value, action_values, (nodes_selected, max_depth(root), terminal_nodes)

@@ -256,7 +256,6 @@ class Trainer:
                              total_iters=total_additional_steps - warmup_steps)
             self.scheduler = SequentialLR(self.opt, schedulers=[warmup, decay], milestones=[warmup_steps])
 
-
     def save(self, milestone: int) -> None:
         """
         Saves the weights of the model for the current milestone.

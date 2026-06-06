@@ -203,6 +203,7 @@ def get_lan_ip():
     finally:
         s.close()
 
+
 def setup_path(dask_worker):
     """
     This function is used to make sure all dask workers have the correct python path configured.
@@ -272,7 +273,8 @@ def generate_loss_plots(loss_dir: str, save_dir: str) -> None:
         ax.set_title(f"train {col}")
         ax.grid(color="lightgray")
 
-    plt.tight_layout();fig.savefig(os.path.join(save_dir, "train_loss.png"))
+    plt.tight_layout();
+    fig.savefig(os.path.join(save_dir, "train_loss.png"))
 
     # 4). Generate and save a plot of the training loss
     fig, axes = plt.subplots(1, 3, figsize=(10, 3))
@@ -283,4 +285,5 @@ def generate_loss_plots(loss_dir: str, save_dir: str) -> None:
         ax.set_title(f"val {col}")
         ax.grid(color="lightgray")
 
-    plt.tight_layout();fig.savefig(os.path.join(save_dir, "val_loss.png"))
+    plt.tight_layout();
+    fig.savefig(os.path.join(save_dir, "val_loss.png"))
