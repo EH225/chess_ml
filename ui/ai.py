@@ -11,8 +11,8 @@ from utils.general import read_yaml, create_move_to_idx_map
 import chess
 
 ### Define the model to play against
-# model_cfg = ("cnn", sa.monte_carlo_tree_search, {"batch_size": 64, "n_iters": 3000})
-model_cfg = ("cnn", sa.naive_search, {"batch_size": 64})
+model_cfg = ("cnn", sa.monte_carlo_tree_search, {"batch_size": 64, "n_iters": 1500})
+# model_cfg = ("cnn", sa.naive_search, {"batch_size": 64})
 model = load_model(model_cfg[0])
 idx_to_move = {v: k for k, v in create_move_to_idx_map().items()}
 
