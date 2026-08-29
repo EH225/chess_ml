@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+    >
+    <title>Interactive Chess Interface</title>
+    <link rel="stylesheet"  href="/static/style.css">
+</head>
+<body>
+
+<div class="app">
+    <h1>Interactive Chess Interface</h1>
+    <div class="game">
+        <div>
+            <div id="board"></div>
+            <div id="status">
+                Your turn
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <h2>Moves</h2>
+            <div id="moves"></div>
+            <button id="new-game">
+                New Game
+            </button>
+        </div>
+    </div>
+</div>
+
+
+<!-- ==============================
+     PROMOTION DIALOG
+     ============================== -->
+
+<div id="promotion-modal" class="modal">
+    <div class="promotion-box">
+        <h2>Choose promotion</h2>
+        <div class="promotion-options">
+            <button type="button"
+                    class="promotion-button"
+                    data-piece="q">
+                Queen
+            </button>
+            <button type="button"
+                    class="promotion-button"
+                    data-piece="r">
+                Rook
+            </button>
+            <button type="button"
+                    class="promotion-button"
+                    data-piece="b">
+                Bishop
+            </button>
+            <button type="button"
+                    class="promotion-button"
+                    data-piece="n">
+                Knight
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
