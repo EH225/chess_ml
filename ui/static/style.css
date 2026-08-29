@@ -5,21 +5,14 @@
 
 body {
     margin: 0;
-
     min-height: 100vh;
-
     background: #312e2b;
-
     color: white;
-
     font-family:
         Arial,
         sans-serif;
-
     display: flex;
-
     justify-content: center;
-
     align-items: center;
 }
 
@@ -32,18 +25,14 @@ body {
 
 h1 {
     text-align: center;
-
     margin-bottom: 25px;
 }
 
 
 .game {
     display: flex;
-
     gap: 25px;
-
     justify-content: center;
-
     align-items: flex-start;
 }
 
@@ -53,19 +42,13 @@ h1 {
    ========================= */
 
 #board {
-
     width: min(70vw, 650px);
-
     height: min(70vw, 650px);
-
     display: grid;
-
     grid-template-columns:
         repeat(8, 1fr);
-
     grid-template-rows:
         repeat(8, 1fr);
-
     box-shadow:
         0 10px 30px
         rgba(0, 0, 0, 0.4);
@@ -73,23 +56,16 @@ h1 {
 
 
 .square {
-
     display: flex;
-
     justify-content: center;
-
     align-items: center;
-
     font-size: clamp(
         30px,
         7vw,
         70px
     );
-
     cursor: pointer;
-
     user-select: none;
-
     position: relative;
 }
 
@@ -117,15 +93,35 @@ h1 {
 }
 
 /* Legal move dot */
+/* Legal move */
 
 .legal::after {
     content: "";
     width: 25%;
     height: 25%;
     border-radius: 50%;
-    background:
-        rgba(0, 0, 0, 0.25);
+    background: rgba(0, 0, 0, 0.25);
     position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+/* Legal capture */
+
+.legal-capture::after {
+    content: "";
+    width: 72%;
+    height: 72%;
+    border: 6px solid rgba(220, 60, 60, 0.75);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-sizing: border-box;
+    pointer-events: none;
 }
 
 
@@ -133,38 +129,25 @@ h1 {
    PIECES
    ========================= */
 .piece {
-
     width: 90%;
     height: 90%;
-
     object-fit: contain;
-
     cursor: grab;
-
     z-index: 2;
-
     user-select: none;
-
     -webkit-user-drag: element;
-
-    transition:
-        transform 0.1s ease;
+    transition: transform 0.1s ease;
 }
 
 
 .piece:hover {
-
-    transform:
-        scale(1.05);
+    transform: scale(1.05);
 }
 
 
 .piece:active {
-
     cursor: grabbing;
-
-    transform:
-        scale(1.1);
+    transform: scale(1.1);
 }
 
 
@@ -173,37 +156,25 @@ h1 {
    ========================= */
 
 .sidebar {
-
     width: 220px;
-
     background: #262522;
-
     border-radius: 8px;
-
     overflow: hidden;
 }
 
 
 .sidebar h2 {
-
     margin: 0;
-
     padding: 15px;
-
     background: #3a3937;
 }
 
 
 #moves {
-
     height: 400px;
-
     overflow-y: auto;
-
     padding: 15px;
-
     font-family: monospace;
-
     color: #ddd;
 }
 
@@ -214,33 +185,21 @@ h1 {
 
 
 #status {
-
     text-align: center;
-
     margin-top: 15px;
-
     font-size: 18px;
-
     font-weight: bold;
 }
 
 
 button {
-
     width: 100%;
-
     padding: 15px;
-
     border: none;
-
     background: #81b64c;
-
     color: white;
-
     font-size: 16px;
-
     font-weight: bold;
-
     cursor: pointer;
 }
 
@@ -255,16 +214,13 @@ button:hover {
    ========================= */
 
 @media (max-width: 800px) {
-
     body {
         align-items: flex-start;
-
         padding-top: 20px;
     }
 
     .game {
         flex-direction: column;
-
         align-items: center;
     }
 
@@ -288,69 +244,47 @@ button:hover {
    ========================= */
 
 .modal {
-
     display: none;
-
     position: fixed;
-
     inset: 0;
-
-    background:
-        rgba(0, 0, 0, 0.65);
-
+    background: rgba(0, 0, 0, 0.65);
     justify-content: center;
-
     align-items: center;
-
     z-index: 100;
 }
 
 
 .modal.show {
-
     display: flex;
 }
 
 
 .promotion-box {
-
     background: #262522;
-
     padding: 30px;
-
     border-radius: 10px;
-
     box-shadow:
         0 10px 40px
         rgba(0, 0, 0, 0.5);
-
     text-align: center;
 }
 
 
 .promotion-box h2 {
-
     margin-top: 0;
-
     margin-bottom: 20px;
 }
 
 
 .promotion-options {
-
     display: flex;
-
     gap: 10px;
 }
 
 
 .promotion-button {
-
     width: auto;
-
     min-width: 100px;
-
     padding: 12px 18px;
-
     border-radius: 6px;
 }

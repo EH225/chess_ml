@@ -47,6 +47,7 @@ let moveNumber = 1;
 let lastMove = null;
 let pendingPromotion = null;
 let checkSquare = null;
+let legalMoves = [];
 
 promotionModal.classList.remove(
     "show"
@@ -57,21 +58,13 @@ promotionModal.classList.remove(
 // =====================================
 
 function drawBoard() {
-
     boardElement.innerHTML = "";
-
     for (let row = 0; row < 8; row++) {
-
         for (let col = 0; col < 8; col++) {
-
-            const square =
-                document.createElement("div");
-
+            const square = document.createElement("div");
             square.classList.add("square");
 
-
             // Board colors
-
             if ((row + col) % 2 === 0) {
                 square.classList.add("light");
             } else {
@@ -80,16 +73,20 @@ function drawBoard() {
 
 
             // Square name, e.g. e4
-
-            const squareName =
-                String.fromCharCode(97 + col)
-                + (8 - row);
-
+            const squareName = String.fromCharCode(97 + col) + (8 - row);
             square.dataset.square = squareName;
 
+            if (legalMoves.includes(squareName)) {
+                const targetPiece = position[row][col];
+
+                if (targetPiece) {
+                    square.classList.add("legal-capture");
+                } else {
+                    square.classList.add("legal");
+                }
+            }
 
             // Last-move highlighting
-
             if (
                 lastMove &&
                 (
@@ -151,70 +148,64 @@ function drawBoard() {
 // =====================================
 // HANDLE SQUARE CLICK
 // =====================================
-
-function handleSquareClick(square) {
-
-    // Don't allow moves if it isn't
-    // the player's turn.
-
-    if (!playerTurn) {
-        return;
-    }
-
-
-    // First click:
-    // select a piece.
+async function handleSquareClick(square) {
+    if (!playerTurn) return;
 
     if (!selectedSquare) {
-
         if (getPiece(square)) {
-
             selectedSquare = square;
-
-            highlightSquare(square);
+            await showLegalMoves(square);
         }
-
         return;
     }
-
-
-    // Clicking the selected square
-    // cancels the selection.
 
     if (selectedSquare === square) {
-
         selectedSquare = null;
-
+        legalMoves = [];
         drawBoard();
-
         return;
     }
-
-
-    // Second click:
-    // attempt the move.
 
     const from = selectedSquare;
     const to = square;
 
-    selectedSquare = null;
-
-
-    // Check for pawn promotion
-
-    if (isPromotionMove(from, to)) {
-
-        showPromotionDialog(from, to);
-
+    if (!legalMoves.includes(to)) {
         return;
     }
 
+    selectedSquare = null;
+    legalMoves = [];
+    drawBoard();
 
-    // Normal move
+    if (isPromotionMove(from, to)) {
+        showPromotionDialog(from, to);
+        return;
+    }
 
     makeMove(from, to);
-
 }
+
+async function showLegalMoves(square) {
+    try {
+        const response = await fetch("/legal-moves", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ square })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) return;
+
+        legalMoves = result.moves;
+        drawBoard();
+        highlightSquare(square);
+
+    } catch (error) {
+        console.error("Error getting legal moves:", error);
+    }
+}
+
 
 
 // =====================================
@@ -597,18 +588,21 @@ newGameButton.addEventListener(
                 await response.json();
 
 
-            if (result.success) {
-                loadFEN(result.fen);
-                movesElement.innerHTML = "";
-                moveNumber = 1;
-                playerTurn = true;
-                selectedSquare = null;
-                lastMove = null;
-                checkSquare = null;
-                pendingPromotion = null;
-                promotionModal.classList.remove("show");
-                statusElement.textContent = "Your turn";
-            }
+        if (result.success) {
+            moveNumber = 1;
+            playerTurn = true;
+            selectedSquare = null;
+            lastMove = null;
+            checkSquare = null;
+            legalMoves = [];
+            pendingPromotion = null;
+
+            promotionModal.classList.remove("show");
+            movesElement.innerHTML = "";
+            loadFEN(result.fen);
+            statusElement.textContent = "Your turn";
+        }
+
 
         } catch (error) {
 

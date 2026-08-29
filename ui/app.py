@@ -64,5 +64,18 @@ def new_game():
     })
 
 
+@app.post("/legal-moves")
+def legal_moves():
+    data = request.json
+    square = data["square"]
+
+    moves = game.get_legal_moves(square)
+
+    return jsonify({
+        "success": True,
+        "moves": moves
+    })
+
+
 if __name__ == "__main__":
     app.run(debug=True)

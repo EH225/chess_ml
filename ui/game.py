@@ -125,3 +125,12 @@ class Game:
             return None
 
         return chess.square_name(king_square)
+
+    def get_legal_moves(self, square):
+        square_index = chess.parse_square(square)
+
+        return [
+            chess.square_name(move.to_square)
+            for move in self.board.legal_moves
+            if move.from_square == square_index
+        ]
