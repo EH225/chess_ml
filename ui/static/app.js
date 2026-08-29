@@ -151,14 +151,9 @@ function drawBoard() {
 async function handleSquareClick(square) {
     if (!playerTurn) return;
 
-    if (!selectedSquare) {
-        if (getPiece(square)) {
-            selectedSquare = square;
-            await showLegalMoves(square);
-        }
-        return;
-    }
+    const piece = getPiece(square);
 
+    // Click selected piece again → deselect
     if (selectedSquare === square) {
         selectedSquare = null;
         legalMoves = [];
@@ -166,12 +161,22 @@ async function handleSquareClick(square) {
         return;
     }
 
-    const from = selectedSquare;
-    const to = square;
-
-    if (!legalMoves.includes(to)) {
+    // Click another one of your pieces → switch selection
+    if (piece && piece === piece.toUpperCase()) {
+        selectedSquare = square;
+        await showLegalMoves(square);
         return;
     }
+
+    // No piece selected
+    if (!selectedSquare) return;
+
+    // Click an illegal destination
+    if (!legalMoves.includes(square)) return;
+
+    // Make the move
+    const from = selectedSquare;
+    const to = square;
 
     selectedSquare = null;
     legalMoves = [];

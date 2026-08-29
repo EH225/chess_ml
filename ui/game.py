@@ -113,7 +113,6 @@ class Game:
 
         Returns None if neither king is in check.
         """
-
         if not self.board.is_check():
             return None
 
